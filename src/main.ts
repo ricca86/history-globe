@@ -3,10 +3,12 @@ import { BUCKETS, bucketForYear, formatBucket, formatYear, parseYear } from "./b
 import { loadBucket, prefetch } from "./data";
 import { t } from "./i18n";
 import { CATEGORY_COLORS, CATEGORY_LABELS, type Category, type HistoryEvent } from "./types";
+import { migrationsInBucket, toArcs, type ArcSegment, type Migration } from "./migrations";
 import { fetchSummary } from "./wikipedia";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const base = import.meta.env.BASE_URL;
+const MIGRATION_COLOR = "#2dd4bf";
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 const slider = $<HTMLInputElement>("slider");
@@ -24,9 +26,10 @@ slider.value = String(bucketForYear(1900).index);
 document.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => (el.textContent = (t as any)[el.dataset.i18n!]));
 playBtn.setAttribute("aria-label", t.play);
 
-$("legend").innerHTML = (Object.keys(CATEGORY_COLORS) as Category[])
-  .map((c) => `<li><i style="background:${CATEGORY_COLORS[c]}"></i>${esc(CATEGORY_LABELS[c])}</li>`)
-  .join("");
+$("legend").innerHTML =
+  (Object.keys(CATEGORY_COLORS) as Category[])
+    .map((c) => `<li><i style="background:${CATEGORY_COLORS[c]}"></i>${esc(CATEGORY_LABELS[c])}</li>`)
+    .join("") + `<li><i class="line" style="background:${MIGRATION_COLOR}"></i>${esc(t.migrations)}</li>`;
 
 const globe = new Globe($("globe"))
   .globeImageUrl(`${base}img/earth-blue-marble.jpg`)
@@ -41,6 +44,21 @@ const globe = new Globe($("globe"))
     const ev = e as HistoryEvent;
     return `<div style="padding:4px 8px;background:#0c1124e6;border-radius:6px"><b>${esc(ev.title)}</b><br><small>${esc(eventDate(ev))}</small></div>`;
   })
+  .arcStartLat("startLat")
+  .arcStartLng("startLng")
+  .arcEndLat("endLat")
+  .arcEndLng("endLng")
+  .arcColor(() => [MIGRATION_COLOR, "#ffffff"])
+  .arcStroke(0.5)
+  .arcAltitudeAutoScale(0.35)
+  .arcDashLength(0.45)
+  .arcDashGap(0.15)
+  .arcDashAnimateTime(2500)
+  .arcLabel((a) => {
+    const m = (a as ArcSegment).migration;
+    return `<div style="padding:4px 8px;background:#0c1124e6;border-radius:6px"><b>${esc(m.title)}</b><br><small>${esc(migrationDate(m))}</small></div>`;
+  })
+  .onArcClick((a) => selectMigration((a as ArcSegment).migration))
   .pointsTransitionDuration(600)
   .onPointClick((e) => select(e as HistoryEvent))
   .ringColor(() => (x: number) => `rgba(255,255,255,${1 - x})`)
@@ -53,11 +71,16 @@ fit();
 window.addEventListener("resize", fit);
 
 let current: HistoryEvent[] = [];
+let currentMigrations: Migration[] = [];
 let loadToken = 0;
 let debounce: ReturnType<typeof setTimeout> | undefined;
 
 function eventDate(e: HistoryEvent): string {
   return e.end !== undefined && e.end !== e.start ? `${formatYear(e.start)} – ${formatYear(e.end)}` : formatYear(e.start);
+}
+
+function migrationDate(m: Migration): string {
+  return m.end !== m.start ? `${formatYear(m.start)} – ${formatYear(m.end)}` : formatYear(m.start);
 }
 
 function showStatus(text: string) {
@@ -67,43 +90,75 @@ function showStatus(text: string) {
 
 function renderList() {
   panelTitle.textContent = t.eventsHeading;
-  if (current.length === 0) {
+  if (current.length === 0 && currentMigrations.length === 0) {
     panelBody.innerHTML = `<p class="meta">${esc(t.noEvents)}</p>`;
     return;
   }
-  panelBody.innerHTML = `<p class="meta">${esc(t.eventsCount(current.length))}</p><ul>${current
+  const migList = currentMigrations.length
+    ? `<h3>${esc(t.migrations)}</h3><ul>${currentMigrations
+        .map(
+          (m, i) =>
+            `<li><button type="button" data-m="${i}"><i class="line" style="background:${MIGRATION_COLOR}"></i>${esc(m.title)}<small>${esc(formatYear(m.start))}</small></button></li>`,
+        )
+        .join("")}</ul>`
+    : "";
+  panelBody.innerHTML = `${migList}${current.length ? `<h3>${esc(t.eventsHeading)} · ${esc(t.eventsCount(current.length))}</h3>` : ""}<ul>${current
     .map(
       (e, i) =>
         `<li><button type="button" data-i="${i}"><i style="background:${CATEGORY_COLORS[e.category]}"></i>${esc(e.title)}<small>${esc(formatYear(e.start))}</small></button></li>`,
     )
     .join("")}</ul>`;
   panelBody.querySelectorAll<HTMLButtonElement>("button[data-i]").forEach((b) => (b.onclick = () => select(current[+b.dataset.i!])));
+  panelBody.querySelectorAll<HTMLButtonElement>("button[data-m]").forEach((b) => (b.onclick = () => selectMigration(currentMigrations[+b.dataset.m!])));
 }
 
-async function select(e: HistoryEvent) {
+interface Detail {
+  title: string;
+  wiki: string;
+  date: string;
+  note?: string;
+}
+
+function select(e: HistoryEvent) {
   globe.pointOfView({ lat: e.lat, lng: e.lon, altitude: 1.6 }, 1000);
   globe.ringsData([e]).ringLat("lat").ringLng("lon");
-  panelTitle.textContent = e.title;
+  return showDetail({ title: e.title, wiki: e.wiki, date: eventDate(e), note: e.approx ? t.approxLocation : undefined });
+}
+
+function selectMigration(m: Migration) {
+  const pts = m.routes.flat();
+  const lat = pts.reduce((a, p) => a + p[0], 0) / pts.length;
+  const lng = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  globe.pointOfView({ lat, lng, altitude: 2.4 }, 1000);
+  globe.ringsData([]);
+  return showDetail({ title: m.title, wiki: m.wiki, date: migrationDate(m), note: t.approxMigration });
+}
+
+async function showDetail(d: Detail) {
+  panelTitle.textContent = d.title;
   panelBody.innerHTML = `<button class="back" type="button">← ${esc(t.eventsHeading)}</button>
-    <p class="meta">${esc(eventDate(e))}${e.approx ? ` · ${esc(t.approxLocation)}` : ""}</p><div id="summary">${esc(t.loading)}</div>`;
+    <p class="meta">${esc(d.date)}${d.note ? ` · ${esc(d.note)}` : ""}</p><div id="summary">${esc(t.loading)}</div>`;
   panelBody.querySelector<HTMLButtonElement>(".back")!.onclick = () => {
     globe.ringsData([]);
     renderList();
   };
   const summaryEl = panelBody.querySelector("#summary")!;
   try {
-    const s = await fetchSummary(e.wiki);
-    if (panelTitle.textContent !== e.title) return;
+    const s = await fetchSummary(d.wiki);
+    if (panelTitle.textContent !== d.title) return;
     summaryEl.innerHTML = `${s.thumbnail ? `<img src="${esc(s.thumbnail)}" alt="">` : ""}<p>${esc(s.extract)}</p>
       <p><a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(t.readMore)}</a></p><p class="credit">${esc(t.attribution)}</p>`;
   } catch {
-    summaryEl.innerHTML = `<p>${esc(t.summaryError)}</p><p><a href="https://en.wikipedia.org/wiki/${encodeURIComponent(e.wiki.replace(/ /g, "_"))}" target="_blank" rel="noopener">${esc(t.readMore)}</a></p>`;
+    if (panelTitle.textContent !== d.title) return;
+    summaryEl.innerHTML = `<p>${esc(t.summaryError)}</p><p><a href="https://en.wikipedia.org/wiki/${encodeURIComponent(d.wiki.replace(/ /g, "_"))}" target="_blank" rel="noopener">${esc(t.readMore)}</a></p>`;
   }
 }
 
 async function show(index: number) {
   const b = BUCKETS[index];
   era.textContent = formatBucket(b);
+  currentMigrations = migrationsInBucket(b);
+  globe.arcsData(toArcs(currentMigrations));
   const token = ++loadToken;
   showStatus(t.loading);
   try {

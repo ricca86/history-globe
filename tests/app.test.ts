@@ -6,6 +6,7 @@ import { beforeAll, expect, it, vi } from "vitest";
 const chain: any = new Proxy(function () {}, {
   get: (_t, prop) => (prop === "controls" ? () => ({}) : (...args: unknown[]) => {
     if (prop === "pointsData") (globalThis as any).__points = args[0];
+    if (prop === "arcsData") (globalThis as any).__arcs = args[0];
     return chain;
   }),
 });
@@ -50,4 +51,17 @@ it("rejects invalid years", async () => {
   input.value = "nonsense";
   document.getElementById("jump")!.dispatchEvent(new Event("submit", { cancelable: true }));
   expect(input.classList.contains("invalid")).toBe(true);
+});
+
+it("shows migration arcs and lists them for ancient periods", async () => {
+  const input = document.getElementById("jump-input") as HTMLInputElement;
+  input.value = "60000 BCE";
+  document.getElementById("jump")!.dispatchEvent(new Event("submit", { cancelable: true }));
+  await settle();
+  expect((globalThis as any).__arcs.length).toBeGreaterThan(0);
+  const btn = document.querySelector("#panel button[data-m]") as HTMLButtonElement;
+  expect(btn).toBeTruthy();
+  btn.click();
+  await settle();
+  expect(document.getElementById("panel-body")!.textContent).toContain("Summary text");
 });

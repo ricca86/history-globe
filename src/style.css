@@ -35,3 +35,5 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); f
   .panel { top: auto; bottom: 150px; right: 8px; left: 8px; width: auto; max-height: 38vh; }
   .status { bottom: 160px; }
 }
+.legend i.line, .panel li i.line { height: 3px; border-radius: 2px; width: 14px; }
+.panel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 10px 0 4px; }
