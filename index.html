@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>History Globe</title>
+    <meta name="description" content="Explore the main events of human history on a rotatable globe and a time slider." />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="globe" aria-label="Interactive globe of historical events"></div>
+    <header class="topbar">
+      <h1 data-i18n="title">History Globe</h1>
+      <ul id="legend" class="legend" aria-label="Event categories"></ul>
+    </header>
+    <aside id="panel" class="panel" aria-live="polite">
+      <h2 id="panel-title"></h2>
+      <div id="panel-body"></div>
+    </aside>
+    <div id="status" class="status" role="status"></div>
+    <footer class="controls">
+      <button id="play" type="button" aria-label="Play" data-i18n-aria="play">▶</button>
+      <div class="slider-wrap">
+        <div id="era" class="era" aria-live="polite"></div>
+        <input id="slider" type="range" min="0" value="0" step="1" aria-label="Time" />
+      </div>
+      <form id="jump" class="jump">
+        <input id="jump-input" type="text" inputmode="text" placeholder="Year, e.g. 1453 or 480 BCE" aria-label="Jump to year" autocomplete="off" />
+        <button type="submit" data-i18n="go">Go</button>
+      </form>
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
