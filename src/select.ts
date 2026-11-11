@@ -1,6 +1,7 @@
 import type { Continent, HistoryEvent } from "./types";
 
-export const SLOTS_PER_BUCKET = 25;
+export const SLOTS_PER_BUCKET = 100;
+export const MAX_PER_CONTINENT = 25;
 const CAPPED: Continent[] = ["europe", "asia", "africa", "americas", "oceania"];
 
 export function continentOf(lat: number, lon: number): Continent {
@@ -15,10 +16,11 @@ export function continentOf(lat: number, lon: number): Continent {
 }
 
 /**
- * Takes the top events by sitelinks with an even per-continent base share; slots a
- * continent cannot fill are redistributed proportionally to continents with spare events.
+ * Takes the top events by sitelinks with an even per-continent base share, never more than
+ * `cap` per continent; slots a continent cannot fill are redistributed proportionally to
+ * continents with spare events (and spare room under the cap).
  */
-export function selectBalanced(candidates: HistoryEvent[], slots = SLOTS_PER_BUCKET): HistoryEvent[] {
+export function selectBalanced(candidates: HistoryEvent[], slots = SLOTS_PER_BUCKET, cap = MAX_PER_CONTINENT): HistoryEvent[] {
   const byContinent = new Map<Continent, HistoryEvent[]>();
   for (const e of [...candidates].sort((a, b) => b.sitelinks - a.sitelinks)) {
     const list = byContinent.get(e.continent) ?? [];
@@ -29,15 +31,15 @@ export function selectBalanced(candidates: HistoryEvent[], slots = SLOTS_PER_BUC
   const taken = new Map<Continent, number>();
   let used = 0;
   for (const c of CAPPED) {
-    const n = Math.min(base, byContinent.get(c)?.length ?? 0);
+    const n = Math.min(base, cap, byContinent.get(c)?.length ?? 0);
     taken.set(c, n);
     used += n;
   }
-  let remaining = Math.min(slots, candidates.length) - used;
+  const room = (c: Continent) => Math.min(cap, byContinent.get(c)?.length ?? 0) - (taken.get(c) ?? 0);
+  const capacity = CAPPED.reduce((a, c) => a + Math.min(cap, byContinent.get(c)?.length ?? 0), 0);
+  let remaining = Math.min(slots, capacity) - used;
   while (remaining > 0) {
-    const spare = CAPPED.map((c) => ({ c, spare: (byContinent.get(c)?.length ?? 0) - (taken.get(c) ?? 0) })).filter(
-      (s) => s.spare > 0,
-    );
+    const spare = CAPPED.map((c) => ({ c, spare: room(c) })).filter((s) => s.spare > 0);
     if (spare.length === 0) break;
     const totalSpare = spare.reduce((a, s) => a + s.spare, 0);
     const shares = spare
